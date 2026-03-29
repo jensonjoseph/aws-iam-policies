@@ -1,0 +1,55 @@
+name: Deploy IAM Policies
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'policies/**/*.json'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy IAM Policies to AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GitHubActions-IAMPolicyDeployer
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install boto3
+
+      - name: Get changed policy files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only HEAD~1 HEAD -- 'policies/**/*.json' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Deploying: $FILES"
+
+      - name: Deploy policies to AWS
+        run: |
+          python scripts/deploy_policy.py ${{ steps.changed.outputs.files }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### IAM Policy Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ vars.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Account:** ${{ vars.AWS_ACCOUNT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Files deployed:** ${{ steps.changed.outputs.files }}" >> $GITHUB_STEP_SUMMARY

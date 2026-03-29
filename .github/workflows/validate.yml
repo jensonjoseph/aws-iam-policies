@@ -1,0 +1,65 @@
+name: Validate IAM Policies
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'policies/**/*.json'
+
+jobs:
+  validate:
+    name: Validate IAM Policies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install boto3
+
+      - name: Get changed policy files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'policies/**/*.json' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $FILES"
+
+      - name: Validate policies
+        id: validate
+        run: |
+          python scripts/validate_policy.py ${{ steps.changed.outputs.files }}
+
+      - name: Comment PR on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **IAM Policy Validation Failed**\n\nOne or more policies violate the least privilege rules. Please review the validation output in the Actions tab and fix the issues before this PR can be merged.'
+            })
+
+      - name: Comment PR on success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **IAM Policy Validation Passed**\n\nAll changed policies comply with the least privilege rules.'
+            })
